@@ -1,0 +1,244 @@
+{
+  "scenario": "cards_scan",
+  "image": "im2.jpeg",
+  "total_detected": 5,
+  "recognized_count": 5,
+  "unrecognized_count": 0,
+  "cards": [
+    {
+      "index": 1,
+      "detected_raw": {
+        "card_name_raw": "Weiheriten",
+        "set_code": null,
+        "collector_number": "217/350",
+        "is_partially_obscured": false,
+        "box_2d": [
+          74,
+          107,
+          396,
+          448
+        ],
+        "corners": {
+          "top_left": [
+            74,
+            107
+          ],
+          "top_right": [
+            76,
+            448
+          ],
+          "bottom_right": [
+            396,
+            439
+          ],
+          "bottom_left": [
+            393,
+            107
+          ]
+        }
+      },
+      "justified_image": "output_cards/im2_crops/card_01.jpg",
+      "matched": true,
+      "scryfall": {
+        "id": "2fe69b76-c6c0-4522-a6aa-ae222b97f509",
+        "name": "Rites of Initiation",
+        "mana_cost": "{R}",
+        "type_line": "Instant",
+        "set": "ody",
+        "set_name": "Odyssey",
+        "collector_number": "217",
+        "rarity": "common",
+        "price_usd": null,
+        "scryfall_uri": "https://scryfall.com/card/ody/217/de/weiheriten-(rites-of-initiation)?utm_source=api"
+      }
+    },
+    {
+      "index": 2,
+      "detected_raw": {
+        "card_name_raw": "Goblin Wardriver",
+        "set_code": null,
+        "collector_number": null,
+        "is_partially_obscured": false,
+        "box_2d": [
+          80,
+          569,
+          383,
+          902
+        ],
+        "corners": {
+          "top_left": [
+            80,
+            569
+          ],
+          "top_right": [
+            80,
+            899
+          ],
+          "bottom_right": [
+            383,
+            902
+          ],
+          "bottom_left": [
+            382,
+            577
+          ]
+        }
+      },
+      "justified_image": "output_cards/im2_crops/card_02.jpg",
+      "matched": true,
+      "scryfall": {
+        "id": "6fb10750-4037-4630-82d3-bb068c335e48",
+        "name": "Goblin Wardriver",
+        "mana_cost": "{R}{R}",
+        "type_line": "Creature — Goblin Warrior",
+        "set": "ddt",
+        "set_name": "Duel Decks: Merfolk vs. Goblins",
+        "collector_number": "50",
+        "rarity": "uncommon",
+        "price_usd": "0.32",
+        "scryfall_uri": "https://scryfall.com/card/ddt/50/goblin-wardriver?utm_source=api"
+      }
+    },
+    {
+      "index": 3,
+      "detected_raw": {
+        "card_name_raw": "Belagerungstrupp-Kommandant",
+        "set_code": "DOM",
+        "collector_number": "143/269",
+        "is_partially_obscured": false,
+        "box_2d": [
+          432,
+          0,
+          842,
+          528
+        ],
+        "corners": {
+          "top_left": [
+            432,
+            237
+          ],
+          "top_right": [
+            571,
+            528
+          ],
+          "bottom_right": [
+            842,
+            239
+          ],
+          "bottom_left": [
+            706,
+            0
+          ]
+        }
+      },
+      "justified_image": "output_cards/im2_crops/card_03.jpg",
+      "matched": true,
+      "scryfall": {
+        "id": "2c3edc6d-c5bc-44ed-b2a0-282efe78a931",
+        "name": "Siege-Gang Commander",
+        "mana_cost": "{3}{R}{R}",
+        "type_line": "Creature — Goblin",
+        "set": "dom",
+        "set_name": "Dominaria",
+        "collector_number": "143",
+        "rarity": "rare",
+        "price_usd": null,
+        "scryfall_uri": "https://scryfall.com/card/dom/143/de/belagerungstrupp-kommandant-(siege-gang-commander)?utm_source=api"
+      }
+    },
+    {
+      "index": 4,
+      "detected_raw": {
+        "card_name_raw": "Worn Powerstone",
+        "set_code": null,
+        "collector_number": null,
+        "is_partially_obscured": true,
+        "box_2d": [
+          491,
+          611,
+          833,
+          977
+        ],
+        "corners": {
+          "top_left": [
+            493,
+            611
+          ],
+          "top_right": [
+            491,
+            959
+          ],
+          "bottom_right": [
+            832,
+            977
+          ],
+          "bottom_left": [
+            833,
+            630
+          ]
+        }
+      },
+      "justified_image": "output_cards/im2_crops/card_04.jpg",
+      "matched": true,
+      "scryfall": {
+        "id": "ace686ad-9e3f-41b3-b8eb-d1b6d45eb4e1",
+        "name": "Worn Powerstone",
+        "mana_cost": "{3}",
+        "type_line": "Artifact",
+        "set": "mh3",
+        "set_name": "Modern Horizons 3",
+        "collector_number": "298",
+        "rarity": "uncommon",
+        "price_usd": "0.40",
+        "scryfall_uri": "https://scryfall.com/card/mh3/298/worn-powerstone?utm_source=api"
+      }
+    },
+    {
+      "index": 5,
+      "detected_raw": {
+        "card_name_raw": "Cursed Mirror",
+        "set_code": "MH3",
+        "collector_number": "0279",
+        "is_partially_obscured": false,
+        "box_2d": [
+          558,
+          573,
+          920,
+          930
+        ],
+        "corners": {
+          "top_left": [
+            558,
+            573
+          ],
+          "top_right": [
+            561,
+            929
+          ],
+          "bottom_right": [
+            920,
+            930
+          ],
+          "bottom_left": [
+            916,
+            573
+          ]
+        }
+      },
+      "justified_image": "output_cards/im2_crops/card_05.jpg",
+      "matched": true,
+      "scryfall": {
+        "id": "6768daa5-41b0-49e1-b71a-63f733b4dc3d",
+        "name": "Cursed Mirror",
+        "mana_cost": "{2}{R}",
+        "type_line": "Artifact",
+        "set": "mh3",
+        "set_name": "Modern Horizons 3",
+        "collector_number": "279",
+        "rarity": "rare",
+        "price_usd": "1.21",
+        "scryfall_uri": "https://scryfall.com/card/mh3/279/cursed-mirror?utm_source=api"
+      }
+    }
+  ]
+}

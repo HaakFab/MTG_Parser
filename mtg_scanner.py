@@ -26,12 +26,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY not found. Please define it in your .env file.")
 
-# Model configuration
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 # ==============================================================================
-# Structured Output Schemas for Gemini Vision
+# Structured Output Schemas for Gemini Vision (Multilingual Aware)
 # ==============================================================================
 class CornerPoints(BaseModel):
     top_left: List[int] = Field(..., description="[y, x] normalized (0-1000)")
@@ -40,7 +39,8 @@ class CornerPoints(BaseModel):
     bottom_left: List[int] = Field(..., description="[y, x] normalized (0-1000)")
 
 class DetectedCard(BaseModel):
-    card_name_raw: str = Field(..., description="Exact card name or visible header text")
+    card_name_raw: str = Field(..., description="Exact card name printed on the card (German, English, etc.)")
+    card_name_en: Optional[str] = Field(None, description="Official English Oracle card name")
     set_code: Optional[str] = Field(None, description="3-4 character set code if visible")
     collector_number: Optional[str] = Field(None, description="Collector number if visible")
     is_partially_obscured: bool = Field(False, description="True if stacked/overlapped card")
@@ -53,34 +53,31 @@ class CardDetectionResult(BaseModel):
 
 
 # ==============================================================================
-# Scryfall Matcher with Memory Cache
+# Multilingual Scryfall Engine
 # ==============================================================================
 class ScryfallEngine:
     BASE_URL = "https://api.scryfall.com"
-    HEADERS = {"User-Agent": "MTGScannerSuite/3.3", "Accept": "application/json"}
+    HEADERS = {"User-Agent": "MTGScannerSuite/4.0", "Accept": "application/json"}
     _cache: Dict[str, Optional[dict]] = {}
 
     @staticmethod
-    def normalize_name(text: str) -> str:
+    def clean(text: Optional[str]) -> str:
         if not text:
             return ""
-        text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("utf-8")
-        text = re.sub(r"[^\w\s\-\'/]", " ", text)
         return re.sub(r"\s+", " ", text).strip()
 
     @classmethod
     def match(cls, card: DetectedCard) -> Optional[dict]:
-        clean_name = cls.normalize_name(card.card_name_raw)
-        cache_key = f"{clean_name}|{card.set_code}|{card.collector_number}"
+        cache_key = f"{card.card_name_raw}|{card.card_name_en}|{card.set_code}|{card.collector_number}"
         if cache_key in cls._cache:
             return cls._cache[cache_key]
 
-        result = cls._resolve(card, clean_name)
+        result = cls._resolve(card)
         cls._cache[cache_key] = result
         return result
 
     @classmethod
-    def _resolve(cls, card: DetectedCard, clean_name: str) -> Optional[dict]:
+    def _resolve(cls, card: DetectedCard) -> Optional[dict]:
         # 1. Exact Set + Collector Number
         if card.set_code and card.collector_number:
             s_code = re.sub(r"[^a-zA-Z0-9]", "", card.set_code).lower()
@@ -93,34 +90,57 @@ class ScryfallEngine:
             except requests.RequestException:
                 pass
 
-        if not clean_name:
-            return None
+        # 2. English / Primary Name Search
+        for name in [card.card_name_en, card.card_name_raw]:
+            if not name:
+                continue
+            clean_name = cls.clean(name)
+            try:
+                params = {"fuzzy": clean_name}
+                if card.set_code:
+                    params["set"] = card.set_code.lower()
+                r = requests.get(f"{cls.BASE_URL}/cards/named", params=params, headers=cls.HEADERS, timeout=5)
+                time.sleep(0.08)
+                if r.status_code == 200:
+                    return r.json()
+            except requests.RequestException:
+                pass
 
-        # 2. Fuzzy Search
-        try:
-            params = {"fuzzy": clean_name}
-            if card.set_code:
-                params["set"] = card.set_code.lower()
-            r = requests.get(f"{cls.BASE_URL}/cards/named", params=params, headers=cls.HEADERS, timeout=5)
-            time.sleep(0.08)
-            if r.status_code == 200:
-                return r.json()
-        except requests.RequestException:
-            pass
-
-        # 3. Autocomplete Typo Fallback
-        try:
-            r = requests.get(f"{cls.BASE_URL}/cards/autocomplete", params={"q": clean_name}, headers=cls.HEADERS, timeout=5)
-            time.sleep(0.08)
-            if r.status_code == 200:
-                suggestions = r.json().get("data", [])
-                if suggestions:
-                    r_top = requests.get(f"{cls.BASE_URL}/cards/named", params={"exact": suggestions[0]}, headers=cls.HEADERS, timeout=5)
+        # 3. Foreign / Printed Name Search (supports German, French, etc.)
+        if card.card_name_raw:
+            raw_clean = cls.clean(card.card_name_raw).replace('"', '')
+            queries = [
+                f'!"{raw_clean}" lang:any',
+                f'printed_name:"{raw_clean}"',
+                f'{raw_clean} lang:any'
+            ]
+            for query in queries:
+                try:
+                    r = requests.get(f"{cls.BASE_URL}/cards/search", params={"q": query}, headers=cls.HEADERS, timeout=5)
                     time.sleep(0.08)
-                    if r_top.status_code == 200:
-                        return r_top.json()
-        except requests.RequestException:
-            pass
+                    if r.status_code == 200:
+                        data = r.json()
+                        if data.get("total_cards", 0) > 0:
+                            return data["data"][0]
+                except requests.RequestException:
+                    pass
+
+        # 4. Autocomplete Typo Fallback
+        for name in [card.card_name_en, card.card_name_raw]:
+            if not name:
+                continue
+            try:
+                r = requests.get(f"{cls.BASE_URL}/cards/autocomplete", params={"q": cls.clean(name)}, headers=cls.HEADERS, timeout=5)
+                time.sleep(0.08)
+                if r.status_code == 200:
+                    suggestions = r.json().get("data", [])
+                    if suggestions:
+                        r_top = requests.get(f"{cls.BASE_URL}/cards/named", params={"exact": suggestions[0]}, headers=cls.HEADERS, timeout=5)
+                        time.sleep(0.08)
+                        if r_top.status_code == 200:
+                            return r_top.json()
+            except requests.RequestException:
+                pass
 
         return None
 
@@ -214,7 +234,7 @@ def annotate_image(image: np.ndarray, card: DetectedCard, matched_data: Optional
 
 
 # ==============================================================================
-# Core Vision & Recognition Pipeline
+# Vision Pipeline
 # ==============================================================================
 def process_single_image(image_path: str, output_dir: str, save_crops: bool = True) -> Tuple[List[dict], int, int]:
     client = genai.Client(api_key=GEMINI_API_KEY)
@@ -227,16 +247,17 @@ def process_single_image(image_path: str, output_dir: str, save_crops: bool = Tr
 
     prompt = (
         "Identify all Magic: The Gathering cards in this photo (isolated or stacked/overlapping).\n"
+        "Cards can be printed in German, English, or other languages.\n"
         "Extract:\n"
         "1. Normalized box `box_2d` [ymin, xmin, ymax, xmax] (0-1000).\n"
         "2. Four outer `corners` in order: top_left, top_right, bottom_right, bottom_left (0-1000).\n"
-        "3. Card title `card_name_raw`.\n"
-        "4. 3-letter set code and collector number if visible in the bottom-left margin.\n"
-        "5. `is_partially_obscured` (true if overlapping/stacked under another card).\n"
-        "6. `is_foil` (true if the card surface has holographic sheen/foil reflection)."
+        "3. `card_name_raw`: Exact name printed on the card.\n"
+        "4. `card_name_en`: The canonical English Oracle name for this card.\n"
+        "5. `set_code` and `collector_number` if visible in the bottom-left margin.\n"
+        "6. `is_partially_obscured` (true if overlapping/stacked under another card).\n"
+        "7. `is_foil` (true if the card surface has holographic sheen/foil reflection)."
     )
 
-    # Use Chat.send_message to eliminate AFC warning
     chat = client.chats.create(
         model=MODEL_NAME,
         config=types.GenerateContentConfig(
@@ -248,7 +269,6 @@ def process_single_image(image_path: str, output_dir: str, save_crops: bool = Tr
     
     response = chat.send_message(message=[pil_img, prompt])
     detection_data: CardDetectionResult = response.parsed
-    
     annotated = cv_img.copy()
     processed_cards = []
     unrecognized_count = 0
@@ -352,7 +372,7 @@ def scenario_deck_scan(image_path: str, output_dir: str):
 # ==============================================================================
 def scenario_cards_scan(image_path: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
-    print(f"\n--- [Scenario 2] Single Image Cards Scan ({MODEL_NAME}): '{image_path}' ---")
+    print(f"\n--- [Scenario 2] Cards Scan ({MODEL_NAME}): '{image_path}' ---")
     
     cards, total_detected, unrecognized = process_single_image(image_path, output_dir, save_crops=True)
 
@@ -470,7 +490,7 @@ def scenario_collection_scan(directory_path: str, output_dir: str):
 # CLI Entry Point
 # ==============================================================================
 def main():
-    parser = argparse.ArgumentParser(description="MTG Vision & Recognition Suite (Chat API + Moxfield)")
+    parser = argparse.ArgumentParser(description="Multilingual MTG Vision & Recognition Suite")
     subparsers = parser.add_subparsers(dest="scenario", required=True, help="Processing Mode")
 
     # Scenario 1: Deck Scan

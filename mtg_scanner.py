@@ -26,7 +26,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY not found. Please define it in your .env file.")
 
-MODEL_NAME = "gemini-3.6-flash"
+# Model configuration
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 # ==============================================================================
@@ -43,6 +44,7 @@ class DetectedCard(BaseModel):
     set_code: Optional[str] = Field(None, description="3-4 character set code if visible")
     collector_number: Optional[str] = Field(None, description="Collector number if visible")
     is_partially_obscured: bool = Field(False, description="True if stacked/overlapped card")
+    is_foil: bool = Field(False, description="True if the card appears to be foil/holographic/shiny")
     box_2d: List[int] = Field(..., description="Bounding box [ymin, xmin, ymax, xmax] (0-1000)")
     corners: Optional[CornerPoints] = Field(None, description="Perspective corners (0-1000)")
 
@@ -55,7 +57,7 @@ class CardDetectionResult(BaseModel):
 # ==============================================================================
 class ScryfallEngine:
     BASE_URL = "https://api.scryfall.com"
-    HEADERS = {"User-Agent": "MTGScannerSuite/3.0", "Accept": "application/json"}
+    HEADERS = {"User-Agent": "MTGScannerSuite/3.3", "Accept": "application/json"}
     _cache: Dict[str, Optional[dict]] = {}
 
     @staticmethod
@@ -124,6 +126,30 @@ class ScryfallEngine:
 
 
 # ==============================================================================
+# Moxfield Formatter Helpers
+# ==============================================================================
+def format_moxfield_line(count: int, name: str, set_code: Optional[str], collector_number: Optional[str], is_foil: bool) -> str:
+    parts = [f"{count} {name}"]
+    if set_code:
+        parts.append(f"({set_code.upper()})")
+    if collector_number and set_code:
+        parts.append(f"{collector_number}")
+    if is_foil:
+        parts.append("*F*")
+    return " ".join(parts)
+
+
+def print_moxfield_terminal(lines: List[str], header: str = "MOXFIELD IMPORT LIST"):
+    print(f"\n{'='*20} {header} {'='*20}")
+    if lines:
+        for line in lines:
+            print(line)
+    else:
+        print("(No matched cards to display)")
+    print("=" * (42 + len(header)) + "\n")
+
+
+# ==============================================================================
 # Image Justification & Annotation
 # ==============================================================================
 def justify_card(image: np.ndarray, card: DetectedCard, output_path: str) -> str:
@@ -159,7 +185,8 @@ def annotate_image(image: np.ndarray, card: DetectedCard, matched_data: Optional
     if matched:
         name = matched_data.get("name", "Card")
         price = matched_data.get("prices", {}).get("usd")
-        label = f"{name} (${price})" if price else name
+        foil_tag = " (Foil)" if card.is_foil else ""
+        label = f"{name}{foil_tag} (${price})" if price else f"{name}{foil_tag}"
         color = (0, 200, 0)
     else:
         label = f"Unmatched: {card.card_name_raw or 'Unknown'}"
@@ -205,20 +232,23 @@ def process_single_image(image_path: str, output_dir: str, save_crops: bool = Tr
         "2. Four outer `corners` in order: top_left, top_right, bottom_right, bottom_left (0-1000).\n"
         "3. Card title `card_name_raw`.\n"
         "4. 3-letter set code and collector number if visible in the bottom-left margin.\n"
-        "5. `is_partially_obscured` (true if overlapping/stacked under another card)."
+        "5. `is_partially_obscured` (true if overlapping/stacked under another card).\n"
+        "6. `is_foil` (true if the card surface has holographic sheen/foil reflection)."
     )
 
-    response = client.models.generate_content(
+    # Use Chat.send_message to eliminate AFC warning
+    chat = client.chats.create(
         model=MODEL_NAME,
-        contents=[pil_img, prompt],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=CardDetectionResult,
             temperature=0.1,
         ),
     )
-
+    
+    response = chat.send_message(message=[pil_img, prompt])
     detection_data: CardDetectionResult = response.parsed
+    
     annotated = cv_img.copy()
     processed_cards = []
     unrecognized_count = 0
@@ -265,21 +295,38 @@ def process_single_image(image_path: str, output_dir: str, save_crops: bool = Tr
 # ==============================================================================
 def scenario_deck_scan(image_path: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
-    print(f"\n--- [Scenario 1] Deck Scan: '{image_path}' ---")
+    print(f"\n--- [Scenario 1] Deck Scan ({MODEL_NAME}): '{image_path}' ---")
     
     cards, total_detected, unrecognized = process_single_image(image_path, output_dir, save_crops=True)
     
-    decklist_counts: Dict[str, int] = {}
+    moxfield_counts: Dict[Tuple[str, Optional[str], Optional[str], bool], int] = {}
+    standard_counts: Dict[str, int] = {}
+
     for c in cards:
         if c["matched"]:
             name = c["scryfall"]["name"]
-            decklist_counts[name] = decklist_counts.get(name, 0) + 1
+            set_code = c["scryfall"].get("set")
+            collector_num = c["scryfall"].get("collector_number")
+            is_foil = c["detected_raw"].get("is_foil", False)
 
-    # Standard Arena/MTGO decklist format (.txt)
+            key = (name, set_code, collector_num, is_foil)
+            moxfield_counts[key] = moxfield_counts.get(key, 0) + 1
+            standard_counts[name] = standard_counts.get(name, 0) + 1
+
     txt_path = os.path.join(output_dir, "decklist.txt")
     with open(txt_path, "w", encoding="utf-8") as f:
-        for name, count in sorted(decklist_counts.items(), key=lambda x: x[0]):
+        for name, count in sorted(standard_counts.items()):
             f.write(f"{count} {name}\n")
+
+    moxfield_lines = []
+    moxfield_txt_path = os.path.join(output_dir, "decklist_moxfield.txt")
+    with open(moxfield_txt_path, "w", encoding="utf-8") as f:
+        for (name, set_code, collector_num, is_foil), count in sorted(moxfield_counts.items(), key=lambda x: x[0][0]):
+            line = format_moxfield_line(count, name, set_code, collector_num, is_foil)
+            moxfield_lines.append(line)
+            f.write(f"{line}\n")
+
+    print_moxfield_terminal(moxfield_lines, "DECK MOXFIELD LIST")
 
     json_payload = {
         "scenario": "deck_scan",
@@ -287,7 +334,7 @@ def scenario_deck_scan(image_path: str, output_dir: str):
         "total_cards_detected": total_detected,
         "recognized_cards_count": total_detected - unrecognized,
         "unrecognized_cards_count": unrecognized,
-        "decklist": [f"{count}x {name}" for name, count in sorted(decklist_counts.items(), key=lambda x: x[0])],
+        "moxfield_decklist": moxfield_lines,
         "cards": cards
     }
 
@@ -295,7 +342,8 @@ def scenario_deck_scan(image_path: str, output_dir: str):
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(json_payload, f, indent=2, ensure_ascii=False)
 
-    print(f"✅ Decklist written to: {txt_path}")
+    print(f"✅ Moxfield Decklist: {moxfield_txt_path}")
+    print(f"✅ Standard Decklist: {txt_path}")
     print(f"✅ Full scan details: {json_path}")
 
 
@@ -304,9 +352,20 @@ def scenario_deck_scan(image_path: str, output_dir: str):
 # ==============================================================================
 def scenario_cards_scan(image_path: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
-    print(f"\n--- [Scenario 2] Single Image Cards Scan: '{image_path}' ---")
+    print(f"\n--- [Scenario 2] Single Image Cards Scan ({MODEL_NAME}): '{image_path}' ---")
     
     cards, total_detected, unrecognized = process_single_image(image_path, output_dir, save_crops=True)
+
+    moxfield_entries = []
+    for c in cards:
+        if c["matched"]:
+            name = c["scryfall"]["name"]
+            set_code = c["scryfall"].get("set")
+            collector_num = c["scryfall"].get("collector_number")
+            is_foil = c["detected_raw"].get("is_foil", False)
+            moxfield_entries.append(format_moxfield_line(1, name, set_code, collector_num, is_foil))
+
+    print_moxfield_terminal(moxfield_entries, "RECOGNIZED CARDS (MOXFIELD FORMAT)")
 
     json_payload = {
         "scenario": "cards_scan",
@@ -314,6 +373,7 @@ def scenario_cards_scan(image_path: str, output_dir: str):
         "total_detected": total_detected,
         "recognized_count": total_detected - unrecognized,
         "unrecognized_count": unrecognized,
+        "moxfield_list": moxfield_entries,
         "cards": cards
     }
 
@@ -330,7 +390,7 @@ def scenario_cards_scan(image_path: str, output_dir: str):
 # ==============================================================================
 def scenario_collection_scan(directory_path: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
-    print(f"\n--- [Scenario 3] Collection Scan: Directory '{directory_path}' ---")
+    print(f"\n--- [Scenario 3] Collection Scan ({MODEL_NAME}): Directory '{directory_path}' ---")
 
     all_files = [
         f for f in glob.glob(os.path.join(directory_path, "*"))
@@ -344,6 +404,7 @@ def scenario_collection_scan(directory_path: str, output_dir: str):
     per_image_results = []
     total_cards_all = 0
     total_unrecognized_all = 0
+    collection_moxfield_counts: Dict[Tuple[str, Optional[str], Optional[str], bool], int] = {}
 
     for idx, img_path in enumerate(all_files, start=1):
         print(f"[{idx}/{len(all_files)}] Processing: {os.path.basename(img_path)}...")
@@ -351,6 +412,14 @@ def scenario_collection_scan(directory_path: str, output_dir: str):
         
         recognized_cards = [c for c in cards if c["matched"]]
         
+        for c in recognized_cards:
+            name = c["scryfall"]["name"]
+            set_code = c["scryfall"].get("set")
+            collector_num = c["scryfall"].get("collector_number")
+            is_foil = c["detected_raw"].get("is_foil", False)
+            key = (name, set_code, collector_num, is_foil)
+            collection_moxfield_counts[key] = collection_moxfield_counts.get(key, 0) + 1
+
         per_image_results.append({
             "image_filename": os.path.basename(img_path),
             "image_path": img_path,
@@ -362,6 +431,18 @@ def scenario_collection_scan(directory_path: str, output_dir: str):
         
         total_cards_all += total
         total_unrecognized_all += unrec
+
+    coll_moxfield_lines = [
+        format_moxfield_line(count, name, set_code, collector_num, is_foil)
+        for (name, set_code, collector_num, is_foil), count in sorted(collection_moxfield_counts.items(), key=lambda x: x[0][0])
+    ]
+
+    coll_moxfield_txt = os.path.join(output_dir, "collection_moxfield.txt")
+    with open(coll_moxfield_txt, "w", encoding="utf-8") as f:
+        for line in coll_moxfield_lines:
+            f.write(f"{line}\n")
+
+    print_moxfield_terminal(coll_moxfield_lines, "COLLECTION MOXFIELD LIST")
 
     manifest = {
         "scenario": "collection_scan",
@@ -380,7 +461,8 @@ def scenario_collection_scan(directory_path: str, output_dir: str):
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     print(f"\n✨ Collection Scan Complete!")
-    print(f"📊 Processed {len(all_files)} images, {total_cards_all} total cards detected.")
+    print(f"📊 Processed {len(all_files)} images, {total_cards_all} cards detected.")
+    print(f"📄 Moxfield Collection Export: {coll_moxfield_txt}")
     print(f"📁 Manifest exported to: {manifest_path}")
 
 
@@ -388,11 +470,11 @@ def scenario_collection_scan(directory_path: str, output_dir: str):
 # CLI Entry Point
 # ==============================================================================
 def main():
-    parser = argparse.ArgumentParser(description="MTG Vision & Recognition Suite (Gemini 2.5 + Scryfall)")
+    parser = argparse.ArgumentParser(description="MTG Vision & Recognition Suite (Chat API + Moxfield)")
     subparsers = parser.add_subparsers(dest="scenario", required=True, help="Processing Mode")
 
     # Scenario 1: Deck Scan
-    deck_parser = subparsers.add_parser("deck", help="Scan deck image and generate formatted decklist")
+    deck_parser = subparsers.add_parser("deck", help="Scan deck image and generate formatted decklists")
     deck_parser.add_argument("image", type=str, help="Path to deck photo")
     deck_parser.add_argument("--out", type=str, default="output_deck", help="Output directory")
 

@@ -8,12 +8,14 @@ The tool supports smartphone camera shots of isolated cards, binder pages, playm
 
 ## Visual Example: Detection & Overlay
 
-Below is an example of the generated overlay showing recognized cards (green bounding boxes with live Scryfall pricing and foil tags) alongside unrecognized cards (red bounding boxes):
+Below are examples of the generated overlay showing recognized cards (green bounding boxes with live Scryfall pricing and foil tags) alongside unrecognized cards (red bounding boxes):
 
 <p align="center">
   <img src="output_cards/im2_annotated.jpg" alt="MTG Card Recognition Overlay" width="750" />
 </p>
-
+<p align="center">
+  <img src="im3_annotated.jpg" alt="MTG Deck Recognition Overlay" width="750" />
+</p>
 ---
 
 ## Features

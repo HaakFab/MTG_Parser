@@ -4,6 +4,8 @@ An automated Magic: The Gathering card recognition pipeline powered by **Gemini 
 
 The tool supports smartphone camera shots of isolated cards, binder pages, playmats, and stacked/cascaded deck piles across 3 primary operational modes.
 
+**This Repo also contains the APK file for the experimental Android App**. It works pretty well and includes a bunch of additional features, but bugs and glitches are included for free.  
+
 ---
 
 ## Visual Example: Detection & Overlay

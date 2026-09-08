@@ -32,12 +32,6 @@ VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 # ==============================================================================
 # Structured Output Schemas for Gemini Vision
 # ==============================================================================
-class CornerPoints(BaseModel):
-    top_left: List[int] = Field(..., description="[y, x] normalized (0-1000)")
-    top_right: List[int] = Field(..., description="[y, x] normalized (0-1000)")
-    bottom_right: List[int] = Field(..., description="[y, x] normalized (0-1000)")
-    bottom_left: List[int] = Field(..., description="[y, x] normalized (0-1000)")
-
 class DetectedCard(BaseModel):
     card_name_raw: str = Field(..., description="Exact card name printed on the card (German, English, etc.)")
     card_name_en: Optional[str] = Field(None, description="Official English Oracle card name")
@@ -48,7 +42,6 @@ class DetectedCard(BaseModel):
     is_partially_obscured: bool = Field(False, description="True if stacked/overlapped card")
     is_foil: bool = Field(False, description="True if card is foil/shiny")
     box_2d: List[int] = Field(..., description="Bounding box [ymin, xmin, ymax, xmax] (0-1000)")
-    corners: Optional[CornerPoints] = Field(None, description="Corners (0-1000)")
 
 class CardDetectionResult(BaseModel):
     cards: List[DetectedCard] = Field(default_factory=list, description="All detected cards")
@@ -270,23 +263,11 @@ def justify_card(image: np.ndarray, card: DetectedCard, output_path: str) -> str
     h, w = image.shape[:2]
     out_w, out_h = 450, 628
 
-    if card.corners and not card.is_partially_obscured:
-        tl = [card.corners.top_left[1] * w / 1000.0, card.corners.top_left[0] * h / 1000.0]
-        tr = [card.corners.top_right[1] * w / 1000.0, card.corners.top_right[0] * h / 1000.0]
-        br = [card.corners.bottom_right[1] * w / 1000.0, card.corners.bottom_right[0] * h / 1000.0]
-        bl = [card.corners.bottom_left[1] * w / 1000.0, card.corners.bottom_left[0] * h / 1000.0]
-
-        src_pts = np.array([tl, tr, br, bl], dtype=np.float32)
-        dst_pts = np.array([[0, 0], [out_w - 1, 0], [out_w - 1, out_h - 1], [0, out_h - 1]], dtype=np.float32)
-
-        matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        warped = cv2.warpPerspective(image, matrix, (out_w, out_h))
-    else:
-        ymin, xmin, ymax, xmax = card.box_2d
-        y1, x1 = max(0, int(ymin * h / 1000.0)), max(0, int(xmin * w / 1000.0))
-        y2, x2 = min(h, int(ymax * h / 1000.0)), min(w, int(xmax * w / 1000.0))
-        cropped = image[y1:y2, x1:x2]
-        warped = cropped if cropped.size > 0 else np.zeros((out_h, out_w, 3), dtype=np.uint8)
+    ymin, xmin, ymax, xmax = card.box_2d
+    y1, x1 = max(0, int(ymin * h / 1000.0)), max(0, int(xmin * w / 1000.0))
+    y2, x2 = min(h, int(ymax * h / 1000.0)), min(w, int(xmax * w / 1000.0))
+    cropped = image[y1:y2, x1:x2]
+    warped = cv2.resize(cropped, (out_w, out_h)) if cropped.size > 0 else np.zeros((out_h, out_w, 3), dtype=np.uint8)
 
     cv2.imwrite(output_path, warped)
     return output_path
@@ -306,22 +287,12 @@ def annotate_image(image: np.ndarray, card: DetectedCard, matched_data: Optional
         label = f"Unmatched: {card.card_name_raw or card.card_name_en or 'Unknown'}"
         color = (0, 0, 230)
 
-    if card.corners and not card.is_partially_obscured:
-        poly_pts = np.array([
-            [int(card.corners.top_left[1] * w / 1000.0), int(card.corners.top_left[0] * h / 1000.0)],
-            [int(card.corners.top_right[1] * w / 1000.0), int(card.corners.top_right[0] * h / 1000.0)],
-            [int(card.corners.bottom_right[1] * w / 1000.0), int(card.corners.bottom_right[0] * h / 1000.0)],
-            [int(card.corners.bottom_left[1] * w / 1000.0), int(card.corners.bottom_left[0] * h / 1000.0)],
-        ], np.int32).reshape((-1, 1, 2))
-        cv2.polylines(image, [poly_pts], isClosed=True, color=color, thickness=3)
-    else:
-        ymin, xmin, ymax, xmax = card.box_2d
-        p1 = (int(xmin * w / 1000.0), int(ymin * h / 1000.0))
-        p2 = (int(xmax * w / 1000.0), int(ymax * h / 1000.0))
-        cv2.rectangle(image, p1, p2, color, 3)
+    ymin, xmin, ymax, xmax = card.box_2d
+    p1 = (int(xmin * w / 1000.0), int(ymin * h / 1000.0))
+    p2 = (int(xmax * w / 1000.0), int(ymax * h / 1000.0))
+    cv2.rectangle(image, p1, p2, color, 3)
 
-    ymin, xmin = int(card.box_2d[0] * h / 1000.0), int(card.box_2d[1] * w / 1000.0)
-    label_pos = (max(10, xmin), max(25, ymin - 8))
+    label_pos = (max(10, p1[0]), max(25, p1[1] - 8))
     (tw, th), bl = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
     cv2.rectangle(image, (label_pos[0], label_pos[1] - th - 4), (label_pos[0] + tw + 6, label_pos[1] + bl), color, -1)
     cv2.putText(image, label, (label_pos[0] + 3, label_pos[1] - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
@@ -334,6 +305,14 @@ def process_single_image(image_path: str, output_dir: str, save_crops: bool = Tr
     client = genai.Client(api_key=GEMINI_API_KEY)
     pil_img = Image.open(image_path)
     cv_img = cv2.imread(image_path)
+
+    # Token optimization: downscale ultra-high-res camera captures to max 1600px
+    max_dim = 1600
+    if max(pil_img.size) > max_dim:
+        scale = max_dim / max(pil_img.size)
+        analysis_img = pil_img.resize((int(pil_img.size[0] * scale), int(pil_img.size[1] * scale)), Image.Resampling.LANCZOS)
+    else:
+        analysis_img = pil_img
     
     crops_dir = os.path.join(output_dir, f"{Path(image_path).stem}_crops")
     if save_crops:
@@ -344,28 +323,36 @@ def process_single_image(image_path: str, output_dir: str, save_crops: bool = Tr
         "Cards can be in German or English.\n"
         "CRITICAL for identifying the exact printing/version: Examine the BOTTOM BORDER of each card:\n"
         "1. Normalized box `box_2d` [ymin, xmin, ymax, xmax] (0-1000).\n"
-        "2. Four outer `corners` in order: top_left, top_right, bottom_right, bottom_left (0-1000).\n"
-        "3. `card_name_raw`: Exact printed name on card (e.g. 'Costly Plunder', 'Vitalitätsschub').\n"
-        "4. `card_name_en`: Canonical English Oracle name.\n"
-        "5. `set_code`: 3-4 character set code at bottom (e.g. 'XLN', 'CLB', 'FIN', 'BRO') if visible.\n"
-        "6. `collector_number`: Collector number at bottom (e.g. '069/279', '0032', '187') if visible.\n"
-        "7. `copyright_year`: For older cards without a set code, extract the 4-digit copyright year (e.g. 1994, 1995, 1998).\n"
-        "8. `artist`: Artist name printed along the bottom edge if legible.\n"
-        "9. `is_partially_obscured` (true if overlapping/stacked).\n"
-        "10. `is_foil` (true if shiny/reflective)."
+        "2. `card_name_raw`: Exact printed name on card (e.g. 'Costly Plunder', 'Vitalitätsschub').\n"
+        "3. `card_name_en`: Canonical English Oracle name.\n"
+        "4. `set_code`: 3-4 character set code at bottom (e.g. 'XLN', 'CLB', 'FIN', 'BRO') if visible.\n"
+        "5. `collector_number`: Collector number at bottom (e.g. '069/279', '0032', '187') if visible.\n"
+        "6. `copyright_year`: For older cards without a set code, extract the 4-digit copyright year (e.g. 1994, 1995, 1998).\n"
+        "7. `artist`: Artist name printed along the bottom edge if legible.\n"
+        "8. `is_partially_obscured` (true if overlapping/stacked).\n"
+        "9. `is_foil` (true if shiny/reflective)."
     )
 
     print(f"🔍 Analyzing image with {MODEL_NAME}...")
-    chat = client.chats.create(
+    response = client.models.generate_content(
         model=MODEL_NAME,
+        contents=[analysis_img, prompt],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=CardDetectionResult,
             temperature=0.1,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
-    
-    response = chat.send_message(message=[pil_img, prompt])
+
+    if response.usage_metadata:
+        meta = response.usage_metadata
+        prompt_tok = meta.prompt_token_count or 0
+        cand_tok = meta.candidates_token_count or 0
+        thought_tok = meta.thoughts_token_count or 0
+        est_cost = (prompt_tok / 1_000_000 * 0.75) + ((cand_tok + thought_tok) / 1_000_000 * 3.75)
+        print(f"📊 Token usage: {prompt_tok} in, {cand_tok} out, {thought_tok} thinking (Est. cost: ${est_cost:.4f})")
+
     detection_data: CardDetectionResult = response.parsed
     print(f"🃏 Located {len(detection_data.cards)} card candidate(s). Resolving with Scryfall Batch API...")
 

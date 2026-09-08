@@ -1,10 +1,12 @@
 # MTG Card Scanner & Recognition Suite
 
-An automated Magic: The Gathering card recognition pipeline powered by **Gemini 3.6 Flash Vision**, **OpenCV** perspective justification, and the **Scryfall API**.
+An automated Magic: The Gathering card recognition pipeline powered by **Gemini 3.8 Flash Vision**, **OpenCV** perspective justification, and the **Scryfall API**.
 
-The tool supports (smartphone camera) shots of isolated cards, binder pages, playmats, and stacked/cascaded deck piles across 3 primary operational modes.
+The suite is available in two form factors:
+1. **Python Command-Line Pipeline (`mtg_scanner.py`)**: High-throughput scanning for decklists, binder pages, card folders, and Moxfield exports.
+2. **Android Mobile Application (`MTG_Parser_0.5.2.apk`)**: Native mobile app built with Kotlin & Jetpack Compose for on-the-go scanning directly via phone camera or gallery.
 
-**This Repo also contains the APK file for the experimental Android App**. It works pretty well and includes a bunch of additional features, but bugs and glitches are included for free.  
+The tool supports smartphone camera shots of isolated cards, binder pages, playmats, and stacked/cascaded deck piles across 3 primary operational modes.
 
 ---
 
@@ -18,36 +20,60 @@ Below are examples of the generated overlay showing recognized cards (green boun
 <p align="center">
   <img src="im3_annotated.jpg" alt="MTG Deck Recognition Overlay" width="750" />
 </p>
+
 ---
 
 ## Features
 
-- **Multi-Card Detection:** Detects single or multiple cards within a single image.
-- **Perspective Justification:** Automatically detects card corners and warps skewed smartphone angles into rectified 450x628 crops.
+- **Multi-Card Detection:** Detects single or multiple cards within a single image using Google Gemini 3.8 Flash Vision.
+- **Perspective Justification:** Automatically detects card corners and warps skewed smartphone angles into rectified crops.
 - **Overlapping/Stacked Card Handling:** Detects partially visible cards in deck piles.
 - **Hybrid Identification:** Combines exact Set Code + Collector Number matching, fuzzy string searching, and Scryfall autocomplete fallback.
 - **Visual Validation:** Generates overview images with color-coded bounding polygons/boxes (Green = Matched, Red = Unmatched) and price overlays.
-- **Moxfield Export:** Exports decklists formatted directly for Moxfield (e.g. `1 Sol Ring (MYS1) 187 *F*`) both to disk and straight to the terminal.
-- **3 Application Modes:** Deck scanning (formatted text decklists), single-image card extraction, and bulk collection audits.
+- **Moxfield Export:** Exports decklists formatted directly for Moxfield (e.g. `1 Sol Ring (MYS1) 187 *F*`) both to disk and straight to the terminal / clipboard.
+- **Two Shells:** Comprehensive Python CLI tool for desktop batch workflows, and a standalone Android app for handheld mobile convenience.
 
 ---
 
-## Prerequisites
+## 📱 Android Application
 
+The repository includes a ready-to-install Android APK: **`MTG_Parser_0.5.2.apk`**.
+
+### Android App Highlights
+- **Direct Camera & Gallery Multi-Select**: Snap photos of cards, binder spreads, or deck piles, or pick existing pictures from your device gallery.
+- **Powered by Gemini 3.8 Flash**: Runs vision recognition directly against Google's latest Gemini 3.8 Flash model.
+- **In-App API Key Configuration**: Easily enter and store your Google Gemini API key securely in the settings modal (stored using Android `EncryptedSharedPreferences`).
+- **One-Tap Moxfield Copy**: Automatically aggregates card quantities and copies the complete formatted decklist (`4 Lightning Bolt (CLB) 187`) straight to your Android clipboard.
+- **Error Reporting**: Displays a warning card with the names of any unrecognized cards.
+
+### Installing the Android APK
+1. Download **`MTG_Parser_0.5.2.apk`** from this repository onto your Android device (Android 8.0+ / API 26+).
+2. Open the downloaded file and confirm installation (allow "Install Unknown Apps" if prompted).
+3. Launch **MTG Scanner**, tap the Settings icon (gear) in the top bar, and paste your Gemini API key from [Google AI Studio](https://aistudio.google.com/).
+4. Take a photo or select gallery images to start scanning!
+
+### Building from Source (Android Studio)
+- Built with Kotlin, Jetpack Compose Material 3, and Google's Generative AI SDK for Android.
+- Target SDK: 35 (Android 15), Min SDK: 26 (Android 8.0).
+- Java Compatibility: Java 17.
+
+---
+
+## 🐍 Python CLI Suite
+
+### Prerequisites
 - Python 3.10+
 - A Google Gemini API key ([Google AI Studio](https://aistudio.google.com/))
 
----
+### Installation & Setup
 
-## Installation & Setup
-
-### 1. Clone the Repository
+#### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/mtg-card-scanner.git
-cd mtg-card-scanner
+git clone https://github.com/HaakFab/MTG_Parser.git
+cd MTG_Parser
 ```
 
-### 2. Create and Activate a Virtual Environment
+#### 2. Create and Activate a Virtual Environment
 ```bash
 # macOS/Linux
 python3 -m venv venv
@@ -62,12 +88,12 @@ python -m venv venv
 venv\Scripts\Activate.ps1
 ```
 
-### 3. Install Required Dependencies
+#### 3. Install Required Dependencies
 ```bash
 pip install google-genai opencv-python pillow pydantic requests python-dotenv
 ```
 
-### 4. Configure Your API Key
+#### 4. Configure Your API Key
 Create a `.env` file in the root directory:
 ```bash
 touch .env
@@ -75,12 +101,12 @@ touch .env
 Add your Gemini API key inside `.env`:
 ```env
 GEMINI_API_KEY="AIzaSyYourActualKeyGoesHere"
-GEMINI_MODEL="gemini-3.6-flash"
+GEMINI_MODEL="gemini-3.8-flash"
 ```
 
 ---
 
-## Usage Guide
+## Python CLI Usage Guide
 
 The script provides 3 distinct subcommands: `deck`, `cards`, and `collection`.
 
@@ -183,10 +209,14 @@ python mtg_scanner.py collection path/to/image_folder/ --out output_collection
 ## Project Structure
 
 ```text
-├── .env                       # Environment variable containing GEMINI_API_KEY
-├── mtg_scanner.py             # Main CLI executable and processing engine
-├── README.md                  # Documentation and setup instructions
-└── output_cards/              # Destination for crops, JSON, and annotated photos
+MTG_Parser/
+├── .gitignore                 # Excludes local environments, API secrets, and raw Android builds
+├── .env                       # Environment variables containing GEMINI_API_KEY (gitignored)
+├── MTG_Parser_0.5.2.apk       # Prebuilt Android APK package ready for installation
+├── mtg_scanner.py             # Main Python CLI executable and processing engine
+├── readme.md                  # Unified documentation and setup guide
+├── im1.jpeg, im2.jpeg, ...    # Sample test images
+└── output_cards/              # Sample destination for crops, JSON, and annotated photos
     ├── im2_annotated.jpg      # Labeled preview overlay image
     └── im2_crops/             # Rectified card crops
 ```
@@ -198,3 +228,4 @@ python mtg_scanner.py collection path/to/image_folder/ --out output_collection
 - **Perspective Distortion:** For best results when photographing cards at steep angles, ensure all 4 card corners are in frame and well-lit.
 - **Stacked Decks:** When photographing overlapping cards, ensure the top title bar and mana cost are visible.
 - **Scryfall Rate Limits:** The script enforces a built-in 80ms delay between API queries and caches identical card lookups to respect Scryfall's API guidelines.
+- **Gemini Model Choice:** `gemini-3.8-flash` delivers the optimal balance of ultra-fast vision reasoning, structured JSON compliance, and cost efficiency.

@@ -1,0 +1,35 @@
+# Secrets & Environment
+.env
+*.env
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.ipynb_checkpoints
+test.ipynb
+
+# Local test outputs
+output_deck/
+output_cards/WhatsApp*
+scratch/
+
+# OS metadata
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Android App Source & Build Artifacts (Only APK is tracked in repo)
+android/
+*Android*
+.gradle/
+build/
+*/build/
+*.iml
+.idea/
+local.properties

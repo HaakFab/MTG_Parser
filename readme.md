@@ -4,7 +4,7 @@ An automated Magic: The Gathering card recognition pipeline powered by **Gemini 
 
 The suite is available in two form factors:
 1. **Python Command-Line Pipeline (`mtg_scanner.py`)**: High-throughput scanning for decklists, binder pages, card folders, and Moxfield exports.
-2. **Android Mobile Application (`MTG_Parser_0.5.2.apk`)**: Native mobile app built with Kotlin & Jetpack Compose for on-the-go scanning directly via phone camera or gallery.
+2. **Android Mobile Application (`MTG_Parser_0.5.3.apk`)**: Native mobile app built with Kotlin & Jetpack Compose for on-the-go scanning directly via phone camera or gallery.
 
 The tool supports smartphone camera shots of isolated cards, binder pages, playmats, and stacked/cascaded deck piles across 3 primary operational modes.
 
@@ -26,28 +26,30 @@ Below are examples of the generated overlay showing recognized cards (green boun
 ## Features
 
 - **Multi-Card Detection:** Detects single or multiple cards within a single image using Google Gemini 3.8 Flash Vision.
+- **Precision Version & Printing Matching:** Reads bottom border identifiers (`set_code`, `collector_number`, `copyright_year` for vintage cards, `artist`) with a multi-tier Scryfall cascade for exact card printings.
 - **Perspective Justification:** Automatically detects card corners and warps skewed smartphone angles into rectified crops.
 - **Overlapping/Stacked Card Handling:** Detects partially visible cards in deck piles.
-- **Hybrid Identification:** Combines exact Set Code + Collector Number matching, fuzzy string searching, and Scryfall autocomplete fallback.
 - **Visual Validation:** Generates overview images with color-coded bounding polygons/boxes (Green = Matched, Red = Unmatched) and price overlays.
-- **Moxfield Export:** Exports decklists formatted directly for Moxfield (e.g. `1 Sol Ring (MYS1) 187 *F*`) both to disk and straight to the terminal / clipboard.
+- **Multi-Format Export:** Exports decklists formatted for Moxfield, Archidekt, TCGplayer, Cardmarket CSV, and plain text.
 - **Two Shells:** Comprehensive Python CLI tool for desktop batch workflows, and a standalone Android app for handheld mobile convenience.
 
 ---
 
 ## 📱 Android Application
 
-The repository includes a ready-to-install Android APK: **`MTG_Parser_0.5.2.apk`**.
+The repository includes a ready-to-install Android APK: **`MTG_Parser_0.5.3.apk`**.
 
 ### Android App Highlights
 - **Direct Camera & Gallery Multi-Select**: Snap photos of cards, binder spreads, or deck piles, or pick existing pictures from your device gallery.
-- **Powered by Gemini 3.8 Flash**: Runs vision recognition directly against Google's latest Gemini 3.8 Flash model.
-- **In-App API Key Configuration**: Easily enter and store your Google Gemini API key securely in the settings modal (stored using Android `EncryptedSharedPreferences`).
-- **One-Tap Moxfield Copy**: Automatically aggregates card quantities and copies the complete formatted decklist (`4 Lightning Bolt (CLB) 187`) straight to your Android clipboard.
-- **Error Reporting**: Displays a warning card with the names of any unrecognized cards.
+- **Side-by-Side Card & Crop Inspection**: Card list and detail views show both the high-res Scryfall print image and the secondary camera photo crop.
+- **Interactive Visual Overlay**: Displays the scanned photo with color-coded bounding boxes; tap any card in the photo to immediately inspect its details and pricing.
+- **Collection Sub-Folders**: Organize scans into custom folders (e.g. Commander Decks, Modern Staples, Trade Binder). Create, rename, delete folders, and move scans between folders with ease.
+- **Folder & Full Collection Export**: Export an entire collection or individual sub-folders directly to Moxfield, Archidekt, TCGplayer, Cardmarket CSV, or Plain Text.
+- **In-App Encrypted API Key Storage**: Enter and store your Google Gemini API key securely in Android's Hardware Keystore via `EncryptedSharedPreferences`.
+- **Persistent Scan History**: Automatically saves scan sessions and captured photos locally for offline review.
 
 ### Installing the Android APK
-1. Download **`MTG_Parser_0.5.2.apk`** from this repository onto your Android device (Android 8.0+ / API 26+).
+1. Download **`MTG_Parser_0.5.3.apk`** from this repository onto your Android device (Android 8.0+ / API 26+).
 2. Open the downloaded file and confirm installation (allow "Install Unknown Apps" if prompted).
 3. Launch **MTG Scanner**, tap the Settings icon (gear) in the top bar, and paste your Gemini API key from [Google AI Studio](https://aistudio.google.com/).
 4. Take a photo or select gallery images to start scanning!
@@ -212,7 +214,7 @@ python mtg_scanner.py collection path/to/image_folder/ --out output_collection
 MTG_Parser/
 ├── .gitignore                 # Excludes local environments, API secrets, and raw Android builds
 ├── .env                       # Environment variables containing GEMINI_API_KEY (gitignored)
-├── MTG_Parser_0.5.2.apk       # Prebuilt Android APK package ready for installation
+├── MTG_Parser_0.5.3.apk       # Prebuilt Android APK package ready for installation
 ├── mtg_scanner.py             # Main Python CLI executable and processing engine
 ├── readme.md                  # Unified documentation and setup guide
 ├── im1.jpeg, im2.jpeg, ...    # Sample test images

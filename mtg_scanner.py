@@ -41,8 +41,10 @@ class CornerPoints(BaseModel):
 class DetectedCard(BaseModel):
     card_name_raw: str = Field(..., description="Exact card name printed on the card (German, English, etc.)")
     card_name_en: Optional[str] = Field(None, description="Official English Oracle card name")
-    set_code: Optional[str] = Field(None, description="3-4 character set code if visible")
-    collector_number: Optional[str] = Field(None, description="Collector number if visible")
+    set_code: Optional[str] = Field(None, description="3-4 character set code at card bottom (e.g. 'XLN', 'CLB', 'FIN') if visible")
+    collector_number: Optional[str] = Field(None, description="Collector number at card bottom (e.g. '069/279', '187', '0032') if visible")
+    copyright_year: Optional[int] = Field(None, description="Copyright year from bottom copyright line (e.g. 1994, 1995, 2023) if visible")
+    artist: Optional[str] = Field(None, description="Artist name printed at the bottom edge if legible")
     is_partially_obscured: bool = Field(False, description="True if stacked/overlapped card")
     is_foil: bool = Field(False, description="True if card is foil/shiny")
     box_2d: List[int] = Field(..., description="Bounding box [ymin, xmin, ymax, xmax] (0-1000)")
@@ -61,11 +63,19 @@ class ScryfallBatchEngine:
     SEARCH_URL = "https://api.scryfall.com/cards/search"
     HEADERS = {"User-Agent": "MTGScannerSuite/5.0", "Accept": "application/json"}
 
+    @staticmethod
+    def clean_collector_number(num: Optional[str]) -> Optional[str]:
+        if not num:
+            return None
+        part = num.split("/")[0].split()[0].strip()
+        clean = re.sub(r"[^a-zA-Z0-9]", "", part)
+        return clean if clean else None
+
     @classmethod
     def resolve_all_cards(cls, detected_cards: List[DetectedCard]) -> List[Optional[dict]]:
         """
         Batches all cards into chunks of up to 75 items to resolve in 1 single HTTP POST request.
-        Falls back to individual search for any unresolved foreign card names.
+        Falls back to individual search for any unresolved foreign card names or specific printings.
         """
         resolved: List[Optional[dict]] = [None] * len(detected_cards)
         identifiers = []
@@ -76,11 +86,14 @@ class ScryfallBatchEngine:
             if not query_name:
                 continue
 
-            # If set code & collector number exist, match exact print
-            if card.set_code and card.collector_number:
-                set_clean = re.sub(r"[^a-zA-Z0-9]", "", card.set_code).lower()
-                num_clean = re.sub(r"[^a-zA-Z0-9]", "", card.collector_number)
-                identifiers.append({"set": set_clean, "collector_number": num_clean})
+            set_clean = re.sub(r"[^a-zA-Z0-9]", "", card.set_code).lower() if card.set_code else None
+            num_clean = cls.clean_collector_number(card.collector_number)
+
+            if set_clean and num_clean:
+                num_stripped = num_clean.lstrip("0") or "0"
+                identifiers.append({"set": set_clean, "collector_number": num_stripped})
+            elif set_clean:
+                identifiers.append({"name": query_name, "set": set_clean})
             else:
                 identifiers.append({"name": query_name})
             mapping.append(idx)
@@ -101,12 +114,32 @@ class ScryfallBatchEngine:
                     data = resp.json()
                     # Map matched results
                     for match in data.get("data", []):
-                        # Match by name or collector number
                         m_name = match.get("name", "").lower()
+                        m_set = match.get("set", "").lower()
+                        m_col = str(match.get("collector_number", "")).lower()
+
                         for pos, orig_idx in enumerate(chunk_mapping):
                             if resolved[orig_idx] is not None:
                                 continue
                             c = detected_cards[orig_idx]
+                            c_set = re.sub(r"[^a-zA-Z0-9]", "", c.set_code).lower() if c.set_code else ""
+                            c_num = cls.clean_collector_number(c.collector_number)
+                            c_num_str = c_num.lstrip("0") if c_num else ""
+
+                            # Exact set + collector number match priority
+                            if c_set and c_num_str and c_set == m_set and (c_num_str == m_col or c_num == m_col):
+                                resolved[orig_idx] = match
+                                break
+
+                            # Set match priority
+                            if c_set and c_set == m_set:
+                                raw_n = (c.card_name_raw or "").lower()
+                                en_n = (c.card_name_en or "").lower()
+                                if m_name == raw_n or m_name == en_n or m_name.startswith(en_n) or raw_n in m_name:
+                                    resolved[orig_idx] = match
+                                    break
+
+                            # Name match
                             raw_n = (c.card_name_raw or "").lower()
                             en_n = (c.card_name_en or "").lower()
                             if m_name == raw_n or m_name == en_n or m_name.startswith(en_n) or raw_n in m_name:
@@ -116,7 +149,7 @@ class ScryfallBatchEngine:
             except requests.RequestException:
                 pass
 
-        # 2. Precision Individual Fallback for remaining unmatched cards (with rate limit backoff)
+        # 2. Precision Individual Fallback for remaining unmatched cards (with multi-tier version matching)
         for idx, card in enumerate(detected_cards):
             if resolved[idx] is None:
                 resolved[idx] = cls._single_card_lookup(card)
@@ -125,20 +158,64 @@ class ScryfallBatchEngine:
 
     @classmethod
     def _single_card_lookup(cls, card: DetectedCard) -> Optional[dict]:
+        set_clean = re.sub(r"[^a-zA-Z0-9]", "", card.set_code).lower() if card.set_code else None
+        num_clean = cls.clean_collector_number(card.collector_number)
+
+        # Tier 1: Direct exact /cards/{set}/{number} endpoint
+        if set_clean and num_clean:
+            for n in [num_clean.lstrip("0") or "0", num_clean]:
+                res = cls._get_with_retry(f"https://api.scryfall.com/cards/{set_clean}/{n}", params={})
+                if res and res.get("object") == "card":
+                    return res
+
         names_to_try = [card.card_name_en, card.card_name_raw]
         for name in names_to_try:
             if not name:
                 continue
             clean_name = re.sub(r"\s+", " ", name).strip()
-            
-            # Fuzzy match
+
+            # Tier 2: Search with set & collector number: !"name" set:... cn:...
+            if set_clean and num_clean:
+                num_stripped = num_clean.lstrip("0") or "0"
+                res = cls._get_with_retry(cls.SEARCH_URL, params={"q": f'!"{clean_name}" set:{set_clean} cn:{num_stripped}'})
+                if res and res.get("total_cards", 0) > 0:
+                    return res["data"][0]
+
+            # Tier 3: Search with collector number only: !"name" cn:...
+            if num_clean:
+                num_stripped = num_clean.lstrip("0") or "0"
+                res = cls._get_with_retry(cls.SEARCH_URL, params={"q": f'!"{clean_name}" cn:{num_stripped}'})
+                if res and res.get("total_cards", 0) > 0:
+                    return res["data"][0]
+
+            # Tier 4: Search with set code: !"name" set:...
+            if set_clean:
+                res = cls._get_with_retry(cls.SEARCH_URL, params={"q": f'!"{clean_name}" set:{set_clean}'})
+                if res and res.get("total_cards", 0) > 0:
+                    return res["data"][0]
+
+            # Tier 5: Search with copyright year (for vintage/older prints lacking set codes at bottom)
+            if card.copyright_year:
+                q = f'!"{clean_name}" year:{card.copyright_year}'
+                if card.artist:
+                    q += f' artist:"{card.artist}"'
+                res = cls._get_with_retry(cls.SEARCH_URL, params={"q": q})
+                if res and res.get("total_cards", 0) > 0:
+                    return res["data"][0]
+
+            # Tier 6: Search with artist
+            if card.artist:
+                res = cls._get_with_retry(cls.SEARCH_URL, params={"q": f'!"{clean_name}" artist:"{card.artist}"'})
+                if res and res.get("total_cards", 0) > 0:
+                    return res["data"][0]
+
+            # Tier 7: Fuzzy match
             res = cls._get_with_retry(cls.NAMED_URL, params={"fuzzy": clean_name})
-            if res:
+            if res and res.get("object") == "card":
                 return res
 
-            # German/foreign language search
-            query = f'!"{clean_name}" lang:any'
-            res = cls._get_with_retry(cls.SEARCH_URL, params={"q": query})
+            # Tier 8: German/foreign language search
+            res = cls._get_with_retry(cls.SEARCH_URL, params={"q": f'!"{clean_name}" lang:any'})
             if res and res.get("total_cards", 0) > 0:
                 return res["data"][0]
 
@@ -265,14 +342,17 @@ def process_single_image(image_path: str, output_dir: str, save_crops: bool = Tr
     prompt = (
         "Identify all Magic: The Gathering cards in this photo (isolated or stacked/overlapping).\n"
         "Cards can be in German or English.\n"
-        "Extract:\n"
+        "CRITICAL for identifying the exact printing/version: Examine the BOTTOM BORDER of each card:\n"
         "1. Normalized box `box_2d` [ymin, xmin, ymax, xmax] (0-1000).\n"
         "2. Four outer `corners` in order: top_left, top_right, bottom_right, bottom_left (0-1000).\n"
-        "3. `card_name_raw`: Exact printed name on card (e.g. 'Vitalitätsschub', 'Thorn of the Black Rose').\n"
-        "4. `card_name_en`: The canonical English Oracle name.\n"
-        "5. `set_code` and `collector_number` if legible.\n"
-        "6. `is_partially_obscured` (true if overlapping/stacked).\n"
-        "7. `is_foil` (true if shiny/reflective)."
+        "3. `card_name_raw`: Exact printed name on card (e.g. 'Costly Plunder', 'Vitalitätsschub').\n"
+        "4. `card_name_en`: Canonical English Oracle name.\n"
+        "5. `set_code`: 3-4 character set code at bottom (e.g. 'XLN', 'CLB', 'FIN', 'BRO') if visible.\n"
+        "6. `collector_number`: Collector number at bottom (e.g. '069/279', '0032', '187') if visible.\n"
+        "7. `copyright_year`: For older cards without a set code, extract the 4-digit copyright year (e.g. 1994, 1995, 1998).\n"
+        "8. `artist`: Artist name printed along the bottom edge if legible.\n"
+        "9. `is_partially_obscured` (true if overlapping/stacked).\n"
+        "10. `is_foil` (true if shiny/reflective)."
     )
 
     print(f"🔍 Analyzing image with {MODEL_NAME}...")
